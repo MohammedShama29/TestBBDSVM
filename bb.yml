@@ -1,0 +1,51 @@
+- name: set subnet name
+  set_fact:
+    var_subnetName: "{{ var_subnetDict[var_environment][var_location] }}"
+   
+- name: set subscriptionID
+  set_fact:
+    var_subscriptionId: "{{ var_azure_rm_subid[var_environment][var_location] }}"
+
+- name: azcli Login and Tokens
+  import_tasks: custom_playbooks/auth_GEN.yml
+
+- name: Get Deployment ID from RG Tags
+  shell: >
+    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.DEPLOYMENT_ID" --output tsv) ;
+  register: var_deploymentId
+
+- name: Get Owners from resourcegroupname
+  shell: >
+    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.OWNER" --output tsv) | awk -F ';' '{print $1}' ;
+  register: var_owner
+
+- name: Get Charge Code from resourcegroupname
+  shell: >
+    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.ENGAGEMENT_ID" --output tsv) ;
+  register: var_chargeCode
+
+- name: Get Product App name from resourcegroupname
+  shell: >
+    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.PRODUCT_APP" --output tsv) ;
+  register: var_productApp
+
+- name: Get keyvault name
+  shell: >
+    az resource list --resource-group "{{  var_resourceGroupName }}" --resource-type "Microsoft.KeyVault/vaults" --query "[].name" -o tsv
+  register: var_keyvaultName
+
+- name: Print oms Key
+  debug:
+    msg: "{{ var_omsKey }}"
+
+- name: Launch VM Building Block
+  uri:
+    url: "{{ towerAPI }}/job_templates/{{ templateNumber }}/launch/"
+    method: POST
+    return_content: yes
+    body: '{ "extra_vars" : "{ \"var_subnetName\": \"{{ var_subnetName }}\", \"var_vmName\": \"{{var_vmName}}\", \"var_domainJoin\": False, \"var_environment\": \"{{ var_environment}}\", \"var_resourceGroupName\": \"{{ var_resourceGroupName}}\", \"var_keyVaultName\": \"{{ var_keyvaultName.stdout }}\", \"var_location\": \"{{ var_location }}\", \"var_computerSize\": \"{{ var_computerSize }}\", \"var_owner\": \"{{ var_owner.stdout }}\", \"var_chargeCode\": \"{{ var_chargeCode.stdout }}\", \"var_deploymentId\": \"{{ var_deploymentId.stdout }}\", \"var_omsMyWorkSpaceId\": \"{{ var_omsMyWorkSpaceId }}\", \"var_omsMyWorkspaceKey\": \"{{ var_omsKey }}\", \"var_productApp\": \"{{var_productApp.stdout}}\" }"}'
+    body_format: json
+    status_code: 200, 201, 400
+    headers:
+      Authorization: "Bearer {{ tokenOutput.json.token }}"
+  register: var_apiOutput

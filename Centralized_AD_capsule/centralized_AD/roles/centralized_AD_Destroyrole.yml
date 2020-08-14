@@ -1,0 +1,104 @@
+- name: Centralized AD - Get Token 
+  block:
+    - name: Centralized AD - Get Token
+      uri:
+        url: "{{ var_centralizedAdTokenUri }}"
+        method: POST
+        body_format:  raw
+        body: client_id={{ var_centralizedAdClientId }}&client_secret={{ var_centralizedAdClientSecret }}&scope={{ var_centralizedAdScope }}&grant_type={{ var_centralizedAdGrantType }}&resource={{ var_centralizedAdClientIdResource }}
+        return_content: yes
+        status_code: 200
+        timeout: 60
+        headers:
+          Content-Type: "application/x-www-form-urlencoded"
+      register: prv_capsule_CentralizedADTokenResponse
+      no_log: true
+  rescue:
+    - fail:
+        msg: "Centralized AD Token response: {{ prv_capsule_CentralizedADTokenResponse.msg }}"
+      no_log: no
+
+- name: Centralized AD - Get OU Status
+  ignore_errors: yes
+  no_log: yes
+  uri:
+    url: "{{ var_centralizedAdUri }}/Capsules/GetOUStatus/{{ var_location }}/{{ var_deploymentId }}/{{ var_environment}}"
+    method: GET
+    body_format: json
+    headers:
+      Authorization: "Bearer {{ prv_capsule_CentralizedADTokenResponse.json.access_token }}"
+      Content-Type: "application/json"
+    return_content: yes
+    status_code: 201, 409, 200
+    timeout: 60
+    validate_certs: false
+  register: prv_capsule_status_CentralizedADResponse
+
+- name: Centralized AD - OU Not found
+  when: prv_capsule_status_CentralizedADResponse.json.errorCode != 0
+  debug:
+    msg: |
+      OU State: {{ prv_capsule_status_CentralizedADResponse.json.state }}
+      OU Path: {{ prv_capsule_status_CentralizedADResponse.json.path }}
+      OU Environment: {{ prv_capsule_status_CentralizedADResponse.json.environment }}
+      OU Message: {{ prv_capsule_status_CentralizedADResponse.json.message }}
+      OU ErrorCode: {{ prv_capsule_status_CentralizedADResponse.json.errorCode }}
+
+- name: Centralized AD - Destroy Capsule
+  when: prv_capsule_status_CentralizedADResponse.json.state == "Created"
+  uri:
+    url: "{{ var_centralizedAdUri }}/Capsules/Destroy"
+    method: POST
+    body_format: json
+    headers:
+      Authorization: "Bearer {{ prv_capsule_CentralizedADTokenResponse.json.access_token }}"
+      Content-Type: "application/json"
+    body:
+      deploymentId: "{{ var_deploymentId }}"
+      location: "{{ var_location}}"
+      environment: "{{ var_environment }}"
+    return_content: yes
+    status_code: 201, 409, 200
+    timeout: 60
+    validate_certs: false
+  register: prv_capsule_CentralizedADResponse
+
+- name: Centralized AD - Get OU Status
+  when: prv_capsule_status_CentralizedADResponse.json.state == "Created"
+  block:
+    - name: Centralized AD - Get OU Status
+      uri:
+        url: "{{ var_centralizedAdUri }}/Capsules/GetOUStatus/{{ var_location }}/{{ var_deploymentId }}/{{ var_environment}}"
+        method: GET
+        body_format: json
+        headers:
+          Authorization: "Bearer {{ prv_capsule_CentralizedADTokenResponse.json.access_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+        status_code: 201, 409, 200
+        timeout: 60
+        validate_certs: false
+      register: prv_capsule_CentralizedADResponse
+      until: prv_capsule_CentralizedADResponse.json.state == "Deleted"
+      retries: 10
+      delay: 20
+      no_log: yes
+  rescue:
+    - name: Timeout while waiting for OU Deletion
+      fail:
+        msg: "Timeout while waiting for OU Deletion. Current State: {{ prv_capsule_CentralizedADResponse.json.state }}"
+      no_log: no
+
+- name: Centralized AD - Show OU Details after deletion
+  when: (prv_capsule_CentralizedADResponse.json.errorCode | default(5)) == 0
+  debug:
+    msg: |
+      OU State: {{ prv_capsule_CentralizedADResponse.json.state }}
+      OU Path: {{ prv_capsule_CentralizedADResponse.json.path }}
+      OU Environment: {{ prv_capsule_CentralizedADResponse.json.environment }}
+      OU Message: {{ prv_capsule_CentralizedADResponse.json.message }}
+      OU ErrorCode: {{ prv_capsule_CentralizedADResponse.json.errorCode }}
+
+
+
+

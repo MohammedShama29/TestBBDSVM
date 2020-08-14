@@ -1,0 +1,134 @@
+---
+- hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  vars:
+    var_azure_rm_subid: "{{ ansible_env['AZURE_RM_SUB_' + var_location] }}"  
+    mandatory_parameters: [
+      "var_location",
+      "var_resourceGroupName",
+      "AZURE_RM_CLIENTID",
+      "AZURE_RM_SECRET",
+      "AZURE_RM_TENANTID",
+      "var_azure_rm_subid"
+    ]
+    
+  tasks:
+    - name: Validations
+      no_log: yes
+      block:
+        - name: Validate Mandatory Parameters
+          assert:
+            msg: "Mandatory parameter {{ item }} is undefined"
+            that:
+              - "{{ item }} is defined"
+          with_items: "{{ mandatory_parameters }}"
+          register: prv_capsuleOutput
+
+      rescue:
+        - name: Validations
+          fail:
+            msg: "{{ ((prv_capsuleOutput.results | default([]) | selectattr('failed', 'equalto', true) | map(attribute='msg') | list) + ([prv_capsuleOutput] | selectattr('results', 'undefined') | map(attribute='msg') | list )) | first }}"
+          no_log: no
+
+    - name: "Get date"
+      command: "date +%s"
+      register: TimeStamp
+
+    - name: AZ Login to Azure
+      block:
+        - name: AZ Login to Azure
+          shell: >
+            az login --service-principal --username {{ AZURE_RM_CLIENTID | quote }} --password {{ AZURE_RM_SECRET | quote }} --tenant {{ AZURE_RM_TENANTID | quote }}
+          changed_when: false
+          register: prv_capsuleOutput
+          no_log: yes
+
+      rescue:
+        - fail:
+            msg: "{{ prv_capsuleOutput.stderr.split('\n') }}"
+
+    - name: Validate Existent VNET
+      shell: >
+        az network vnet list -g {{ var_resourceGroupName | quote }} --query [0].name --output tsv --subscription {{ var_azure_rm_subid | quote }}
+      register: var_existingVnet
+
+    - name: Save Virtual Network Name
+      set_fact:
+        var_virtualNetworkName: "{{ var_existingVnet.stdout }}"
+      when: var_existingVnet.stdout != ""      
+     
+    - name: Get VNET Peering Info
+      shell: >
+        az network vnet peering list -g "{{ var_resourceGroupName }}" --vnet-name "{{ var_virtualNetworkName }}" --query "[?peeringState == 'Connected'].remoteVirtualNetwork.id" --subscription {{ var_azure_rm_subid | quote }}
+      register: var_vnetPeeringInfo
+      when: var_existingVnet.stdout != ""
+
+    - name: Save Virtual Network Peering Info
+      set_fact:
+        var_capsuleVNetInfo: "{{ var_vnetPeeringInfo.stdout }}"
+      when: var_existingVnet.stdout != ""
+
+    - name: Get all the Subnets on the VNet
+      shell: >
+        az network vnet subnet list -g "{{ var_resourceGroupName }}" --vnet-name "{{ var_virtualNetworkName }}" --query [].name --output tsv --subscription {{ var_azure_rm_subid | quote }}
+      register: var_subnetlistTemp
+      when: var_existingVnet.stdout != ""
+
+    - name: Save the SubnetList
+      set_fact:
+        var_subnetlist: "{{ var_subnetlistTemp.stdout_lines }}"
+      when: var_existingVnet.stdout != ""      
+
+    - name: Grab DeploymentID / Environment from resource group
+      shell: >
+        az group show --resource-group {{ var_resourceGroupName | quote }} --subscription {{ var_azure_rm_subid | quote }} --query tags --output json
+      changed_when: false
+      register: prv_capsule_rg_Tags
+
+    - name: Set variables for Centralized AD
+      set_fact:
+        var_deploymentId: "{{ (prv_capsule_rg_Tags.stdout | from_json).DEPLOYMENT_ID }}"
+        var_environment: "{{ (prv_capsule_rg_Tags.stdout | from_json).ENVIRONMENT }}"
+
+- name: Destroy NSG
+  import_playbook: ../../network-security-group/V1.4.0/Destroy_network-security-group.yml
+  vars:
+    var_buildingBlockVersion: "V1.4.0"
+
+- name: Destroy Resource Group
+  import_playbook: ../../resource-group/V1.1.6/Destroy_resource-group.yml
+  vars:
+    var_buildingBlockVersion: "V1.1.6"
+
+- name: Destroy Subnet    
+  import_playbook: ../../subnet/V1.3.1/Destroy_subnet.yml
+  vars:
+    var_buildingBlockVersion: "V1.3.1"
+  when: var_existingVnet.stdout == ""  
+
+- name: Destroy Subnet in same Capsule
+  import_playbook: ../../subnet/V1.3.1/Destroy_subnet.yml
+  vars:
+    var_buildingBlockVersion: "V1.3.1"
+    var_subnetDestroyed: True
+  when: var_existingVnet.stdout != ""
+
+- name: Destroy Virtual Network in the same Capsule
+  import_playbook: ../../virtual-network/V1.0.1/Destroy_virtual-network.yml
+  vars:
+    var_buildingBlockVersion: "V1.0.1"
+  when: var_existingVnet.stdout != ""
+
+- hosts: localhost
+
+  vars:
+    var_azure_rm_subid: "{{ ansible_env['AZURE_RM_SUB_' + var_location] }}"  
+
+  tasks:
+    - name: Centralized AD - Destroy Capsule
+      block:
+
+        - name: Destroy Centralized AD Capsule
+          include_tasks: roles/centralizedAd_Destroy_role.yml

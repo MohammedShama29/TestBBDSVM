@@ -1,0 +1,109 @@
+---
+  - hosts: localhost
+    connection: local
+    gather_facts: yes
+
+    vars:
+      var_environment: "Development"
+      var_rolePurpose: "Building Blocks"
+      
+      # Asserts variables
+      mandatory_parameters: [
+        "AZURE_RM_CLIENTID",
+        "AZURE_RM_SECRET",
+        "AZURE_RM_TENANTID",
+        "var_location",
+        "var_deploymentId",
+        "var_owner",
+        "var_chargeCode"
+      ]
+
+    tasks:
+    - name: Validations
+      no_log: yes
+      block:
+        - name: Validate Mandatory Parameters
+          assert:
+            msg: "Mandatory parameter {{ item }} is not defined"
+            that:
+              - "{{ item }} is defined"
+          with_items: "{{ mandatory_parameters }}"
+          register: prv_capsuleOutput
+
+        - name: Validate Subnet Required Ips Variables If Defined
+          when: var_subnetRequiredIps is defined
+          assert:
+            msg: "{{ var_subnetRequiredIps }} should be integer , you may have unnecesary quotes"
+            that:
+              - (var_subnetRequiredIps | type_debug) == 'int'
+          register: prv_capsuleOutput
+
+        - name: Validate Vnet Required Ips Variables If Defined
+          when: var_vnetRequiredIps is defined
+          assert:
+            msg: "{{ var_vnetRequiredIps }} should be integer , you may have unnecesary quotes"
+            that:
+              - (var_vnetRequiredIps | type_debug) == 'int'
+          register: prv_capsuleOutput
+
+      rescue:
+        - name: Validations
+          fail:
+            msg: "{{ ((prv_capsuleOutput.results | default([]) | selectattr('failed', 'equalto', true) | map(attribute='msg') | list) + ([prv_capsuleOutput] | selectattr('results', 'undefined') | map(attribute='msg') | list )) | first }}"
+          no_log: no
+
+    - name: "Get date"
+      command: "date +%s"
+      register: TimeStamp
+    
+  - name: Create Resource Group
+    import_playbook: ../../resource-group/V1.1.6/Create_resource-group.yml
+    vars:
+      var_buildingBlockVersion: "V1.1.6"
+
+  - name: Create Key Vault
+    import_playbook: ../../key-vault/V1.3.1/Create_key-vault.yml
+    vars:
+      var_buildingBlockVersion: "V1.3.1"
+
+  - name: Create VNET    
+    when: var_enableVirtualNetwork == "Yes"
+    import_playbook: ../../virtual-network/V1.0.1/Create_virtual-network.yml
+    vars:
+      var_buildingBlockVersion: "V1.0.1"
+      var_enableVirtualNetwork: "No"
+      var_numberOfIps: "{{ var_vnetRequiredIps }}"
+
+  - name: Create Subnet
+    when: var_enableSubnet == "Yes"
+    import_playbook: ../../subnet/V1.3.1/Create_subnet.yml
+    vars:
+      var_buildingBlockVersion: "V1.3.1"
+      var_enableSubnet: "No"
+      var_requiredIps: "{{ var_subnetRequiredIps }}"
+
+  - name: Create NSG
+    when: var_enableNetworkSecurityGroup == "Yes" and var_enableSubnet == "Yes"
+    import_playbook: ../../network-security-group/V1.4.0/Create_network-security-group.yml
+    vars:
+      var_buildingBlockVersion: "V1.4.0"
+      var_enableSubnet: "No"
+      var_enableNetworkSecurityGroup: "No"
+
+  - name: Create Availability Set
+    when: var_enableAvailabilitySet == "Yes"
+    import_playbook: ../../availability-set/V1.1.33/Create_availability-set.yml
+    vars:
+      var_buildingBlockVersion: "V1.1.33"
+      var_enableAvailabilitySet: "No"
+      var_rolePurpose: "Availability Set for VMs"
+
+  - hosts: localhost
+
+    vars:
+      var_enableCentralizedAD: "No"
+
+    tasks:
+    - name: Create Centralized AD Capsule
+      when: (var_enableCentralizedAD == "Yes") and (var_enableSubnet | default("No") == "Yes") and (var_enableNetworkSecurityGroup | default("No") == "Yes")
+      include_tasks: roles/centralizedAd_Create_role.yml  

@@ -1,0 +1,188 @@
+---
+  - hosts: localhost
+    connection: local
+    gather_facts: yes
+
+    vars:
+      var_environment: "Development"
+      var_rolePurpose: "Building Blocks"
+      var_enableVMWindowsActiveDirectory: "No"
+
+      mandatory_parameters: [
+        "{{ AZURE_RM_CLIENTID }}",
+        "{{ AZURE_RM_SECRET }}",
+        "{{ AZURE_RM_TENANTID }}",
+        "{{ var_location }}",
+        "{{ var_deploymentId }}",
+        "{{ var_owner }}",
+        "{{ var_chargeCode }}"
+      ]
+
+    tasks:
+    - name: Validations
+      no_log: yes
+      block:
+        - name: Validate Mandatory Parameters
+          assert:
+            msg: "Mandatory parameter {{ item }} is not defined"
+            that:
+              - item is defined
+          with_items: "{{ mandatory_parameters }}"
+          register: prv_capsuleOutput
+
+        - name: Validate Subnet Required Ips Variables If Defined
+          when: var_subnetRequiredIps is defined
+          assert:
+            msg: "{{ var_subnetRequiredIps }} should be integer , you may have unnecesary quotes"
+            that:
+              - (var_subnetRequiredIps | type_debug) == 'int'
+          register: prv_capsuleOutput
+
+        - name: Validate Vnet Required Ips Variables If Defined
+          when: var_vnetRequiredIps is defined
+          assert:
+            msg: "{{ var_vnetRequiredIps }} should be integer , you may have unnecesary quotes"
+            that:
+              - (var_vnetRequiredIps | type_debug) == 'int'
+          register: prv_capsuleOutput
+
+        - name: Validate OMS Values If Virtual Machines Are Deployed
+          when: var_enableVMWindowsActiveDirectory == "Yes"
+          assert:
+            msg: "OMS Parameters var_omsMyWorkSpaceId and var_omsMyWorkspaceKey must be defined"
+            that:
+              - var_omsMyWorkSpaceId is defined
+              - var_omsMyWorkspaceKey is defined
+          register: prv_capsuleOutput
+
+      rescue:
+        - name: Validations
+          fail:
+            msg: "{{ ((prv_capsuleOutput.results | default([]) | selectattr('failed', 'equalto', true) | map(attribute='msg') | list) + ([prv_capsuleOutput] | selectattr('results', 'undefined') | map(attribute='msg') | list )) | first }}"
+          no_log: no
+
+    - name: "Get date"
+      command: "date +%s"
+      register: TimeStamp
+
+  - name: Create Resource Group
+    import_playbook: ../../resource-group/V1.1.6/Create_resource-group.yml
+    vars:
+      var_buildingBlockVersion: "V1.1.6"
+
+  - name: Create Key Vault
+    import_playbook: ../../key-vault/V1.3.1/Create_key-vault.yml
+    vars:
+      var_buildingBlockVersion: "V1.3.1"
+
+  - name: Create VNET    
+    when: var_enableVirtualNetwork == "Yes"
+    import_playbook: ../../virtual-network/V1.0.1/Create_virtual-network.yml
+    vars:
+      var_buildingBlockVersion: "V1.0.1"
+      var_enableVirtualNetwork: "No"
+      var_numberOfIps: "{{ var_vnetRequiredIps }}"
+
+  - name: Create Subnet
+    when: var_enableSubnet == "Yes"
+    import_playbook: ../../subnet/V1.3.1/Create_subnet.yml
+    vars:
+      var_buildingBlockVersion: "V1.3.1"
+      var_enableSubnet: "No"
+      var_requiredIps: "{{ var_subnetRequiredIps }}"
+
+  - name: Create NSG
+    when: var_enableNetworkSecurityGroup == "Yes" and var_enableSubnet == "Yes"
+    import_playbook: ../../network-security-group/V1.4.0/Create_network-security-group.yml
+    vars:
+      var_buildingBlockVersion: "V1.4.0"
+      var_enableSubnet: "No"
+      var_enableNetworkSecurityGroup: "No"
+
+  - name: Create Availability Set
+    when: var_enableAvailabilitySet == "Yes"
+    import_playbook: ../../availability-set/V1.1.33/Create_availability-set.yml
+    vars:
+      var_buildingBlockVersion: "V1.1.33"
+      var_enableAvailabilitySet: "No"
+      var_rolePurpose: "Availability Set for Domain Controller"
+
+  - name: Create VM Windows Active Directory
+    when: var_enableVMWindowsActiveDirectory == "Yes" and var_enableSubnet == "Yes" and var_enableNetworkSecurityGroup == "Yes"
+    import_playbook: ../../vm-windows-active-directory/V1.4.1/Create_vm-windows-active-directory.yml
+    vars:
+      var_buildingBlockVersion: "V1.4.1"
+      var_enableSubnet: "No"
+      var_enableNetworkSecurityGroup: "No"
+      var_enableVMWindowsActiveDirectory: "No"
+      var_enableBackup: "No"
+
+  - hosts: localhost
+    tasks:
+    - name: Create Variables On Primary Play
+      set_fact:
+        var_enableVMWindowsActiveDirectory: "No"
+        var_enableSubnet: "No"
+        var_enableNetworkSecurityGroup: "No"
+
+    - name: Primary DC for the Backup
+      set_fact:
+        var_backupPrimaryDC: "{{ var_vmName }}"
+      when: var_enableVMWindowsActiveDirectory == "Yes" and var_enableSubnet == "Yes" and var_enableNetworkSecurityGroup == "Yes"  
+
+  - name: Create Additional VM Windows Active Directory
+    when: var_enableVMWindowsActiveDirectory == "Yes" and var_enableVMWindowsActiveDirectoryHA == "Yes"
+    import_playbook: ../../vm-windows-additional-domain-controller/V1.1.1/Create_vm-windows-additional-domain-controller.yml
+    vars:
+      var_buildingBlockVersion: "V1.1.1"
+      var_enableVMWindowsActiveDirectory: "No"
+      var_enableVMWindowsActiveDirectoryHA: "No"
+      var_enableBackup: "No"
+      var_generateVMName: "Yes"
+
+  - hosts: localhost
+    tasks:
+    - name: Create Names For Backup
+      set_fact:
+        var_enableBackup: "No"
+        var_enableVMWindowsActiveDirectoryHA: "No"
+
+    - name: Create Names For Backup
+      when: var_enableVMWindowsActiveDirectory == "Yes" and var_enableSubnet == "Yes" and var_enableNetworkSecurityGroup == "Yes" and var_enableVMWindowsActiveDirectoryHA == "Yes"
+      set_fact:
+        var_backupSecondaryDC: "{{ var_vmName }}"
+
+    - name: Create Names For Backup
+      when: var_enableBackup == "Yes" and var_enableVMWindowsActiveDirectory == "Yes"
+      set_fact:
+        var_resourceGroupName: "{{ var_resourceGroupName }}_RSV"
+        var_protectedVmsResourceGroupName: "{{ var_resourceGroupName }}"
+        var_recoveryServicesVaultResourceGroupName: "{{ var_resourceGroupName }}_RSV"
+        var_protectedVmsNames: "{{ var_backupPrimaryDC }}"
+
+    - name: Create Names For Backup with Secondary DC
+      when: var_enableBackup == "Yes" and var_enableVMWindowsActiveDirectory == "Yes" and var_enableVMWindowsActiveDirectoryHA == "Yes"
+      set_fact:
+        var_protectedVmsNames: "{{ var_backupPrimaryDC }},{{ var_backupSecondaryDC }}"
+
+  - name: Create Resource Group For Recovery Service Vault
+    when: var_enableBackup == "Yes" and var_enableVMWindowsActiveDirectory == "Yes"
+    import_playbook: ../../resource-group/V1.1.6/Create_resource-group.yml
+    vars:
+      var_buildingBlockVersion: "V1.1.6"
+      var_enableBackup: "No"
+
+  - name: Create Recovery Service Vault
+    when: var_enableBackup == "Yes" and var_enableVMWindowsActiveDirectory == "Yes"
+    import_playbook: ../../recovery-vault/V1.0.1/Create_recovery-vault.yml
+    vars:
+      var_buildingBlockVersion: "V1.0.1"
+      var_enableBackup: "No"
+
+  - name: Add VM To Backup
+    when: var_enableBackup == "Yes" and var_enableVMWindowsActiveDirectory == "Yes"
+    import_playbook: ../../recovery-vault-backup-vm/V1.0.0/Create_recovery-vault-backup-vm.yml
+    vars:
+      var_buildingBlockVersion: "V1.0.0"
+      var_recoveryServicesVaultName: "{{ var_recoveryVaultName }}"
+      var_enableBackup: "No"
