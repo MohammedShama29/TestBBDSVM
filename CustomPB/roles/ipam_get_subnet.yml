@@ -1,0 +1,40 @@
+
+
+    - name: Get Token
+      uri:
+        url: "{{ var_ipamTokenUri }}"
+        method: POST
+        body_format:  raw
+        body: client_id={{ var_ipamClientId }}&client_secret={{ var_ipamClientSecret }}&scope={{ var_ipamScope }}&grant_type={{ var_ipamGrantType }}&resource={{ var_ipamClientIdResource }}       
+        return_content: yes
+        status_code: 200
+        timeout: 60
+        headers:
+          Content-Type: "application/x-www-form-urlencoded"
+      register: ipamTokenResponse
+      no_log: true
+      
+    - name: Get Subnet information From IPAM
+      uri:
+        url: "{{ var_ipamUrl }}/API/Orgs/{{ var_ipamOrganization}}/{{'subnets' if var_subnetName is defined else 'subnets/ByEngagement'}}/{{ var_subnetName if var_subnetName is defined else var_resourceGroupName }}"
+        method: GET
+        body_format: json
+        headers:
+          api-version: "{{ var_ipamApiVersion }}"
+          Authorization: "Bearer {{ ipamTokenResponse.json.access_token }}"
+          Content-Type: "application/json"
+        return_content: yes
+        status_code: 201,409,200
+        timeout: 60
+        body_format: json
+        validate_certs: false
+      register: ipamResponse
+      ignore_errors: true
+
+    - fail:
+        msg: "IPAM Error - Error code: {{ ipamResponse.status }} - {{ ipamResponse.json }} "
+      when: ipamResponse is not success
+
+    - name: Save ipam results
+      set_fact:
+        ipamresponse: "{{ ipamResponse }}"

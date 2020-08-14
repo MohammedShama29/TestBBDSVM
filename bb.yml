@@ -1,51 +1,419 @@
-- name: set subnet name
-  set_fact:
-    var_subnetName: "{{ var_subnetDict[var_environment][var_location] }}"
-   
-- name: set subscriptionID
-  set_fact:
-    var_subscriptionId: "{{ var_azure_rm_subid[var_environment][var_location] }}"
+# ansible-playbook Create_WindowsDomainController.yml --extra-vars "AZURE_RM_CLIENTID='64d25bec-cb2b-4548-a93e-7a65f1d3803f' AZURE_RM_SECRET='0zRXNzcX2O0VAX+cCYUj//z0fGQ1KwYAV+UU2rpmkcY=' AZURE_RM_TENANTID='4667418b-7015-4ceb-b207-2193896769a8'" -vv
+---
+  - connection: local
+    gather_facts: true
+    hosts: localhost
 
-- name: azcli Login and Tokens
-  import_tasks: custom_playbooks/auth_GEN.yml
+    vars:
+      ## Variables - To be provided via API
+      var_computerSize: "Standard_D4s_v3"
+      var_osDiskStorageType: "Standard_LRS"
+      var_osDiskSize: "127"
+      var_dataDiskStorageType: "Standard_LRS"
+      var_dataDrivesList: "0"
+      var_availabilitySetName: ""
+      var_domainUser: "BukowCH"
+      var_environment: "Development"
+      var_rolePurpose: "App Server"
+      var_localAdminUser: "Bukowch"
+      var_recoveryServicesVaultPolicyName: "CTPE"
+      var_imageReferencePublisher: "MicrosoftWindowsServer"
+      var_imageReferenceOffer: "WindowsServer"
+      var_imageReferenceSku: "2016-Datacenter"
+      var_imageReferenceVersion: "latest"
+      var_domainJoin: True
+      var_dnsArray: []
 
-- name: Get Deployment ID from RG Tags
-  shell: >
-    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.DEPLOYMENT_ID" --output tsv) ;
-  register: var_deploymentId
+      ## Variables - Tower Environment
+      var_templateRepoUrl: "{{ ansible_env.TEMPLATEREPOURL }}"
+      var_templateSasToken: "{{ ansible_env.TEMPLATESASTOKEN }}"
+      var_softwareRepoUrl: "{{ ansible_env.SOFTWAREREPOURL }}"
+      var_softwareSasToken: "{{ ansible_env.SOFTWARESASTOKEN }}"
+      var_azure_rm_subid: "{{ ansible_env['AZURE_RM_SUB_' + var_location] }}"
+      var_cwpCustomerId: "{{ ansible_env.cwpCustomerId }}"
+      var_cwpDomainId: "{{ ansible_env.cwpDomainId }}"
+      var_cwpForceReboot: "{{ ansible_env.cwpForceReboot }}"
+      var_cwpClientId: "{{ ansible_env.cwpClientId }}"
+      var_cwpCustomerSecretKey: "{{ ansible_env.cwpCustomerSecretKey }}"
+      var_cwpClientSecretKey: "{{ ansible_env.cwpClientSecretKey }}"
+      var_dscAutomationUri: "{{ ansible_env.DSCAUTOMATIONURL }}"
+      var_dscAutomationKey: "{{ ansible_env.DCSAUTOMATIONKEY }}"
 
-- name: Get Owners from resourcegroupname
-  shell: >
-    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.OWNER" --output tsv) | awk -F ';' '{print $1}' ;
-  register: var_owner
+      ## Variables - Meaningful
+      var_mnfTokenUri: "https://login.microsoftonline.com/{{ AZURE_RM_TENANTID }}/oauth2/token"
+      var_mnfClientId: "{{ AZURE_RM_CLIENTID }}"
+      var_mnfClientIdResource: "04f78c19-e88d-4b37-b778-f79e3ebaf9f9"
+      var_mnfClientSecret: "{{ AZURE_RM_SECRET | urlencode }}"
+      var_mnfScope: "openid profile offline_access"
+      var_mnfGrantType: "client_credentials"
+      var_mnfUri: "https://uksqmngweb001.azurewebsites.net/api/Meaning"     
 
-- name: Get Charge Code from resourcegroupname
-  shell: >
-    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.ENGAGEMENT_ID" --output tsv) ;
-  register: var_chargeCode
+      ### IPAM Variables
+      var_ipamUrl: "{{ ansible_env.IPAMURL }}"
+      var_ipamTokenUri: "https://login.microsoftonline.com/{{ AZURE_RM_TENANTID }}/oauth2/token"
+      var_ipamClientId: "{{ AZURE_RM_CLIENTID }}"
+      var_ipamClientIdResource: "95ed5b7a-e96b-49c1-9864-18f61dcfcb3a"
+      var_ipamClientSecret: "{{ AZURE_RM_SECRET | urlencode }}"
+      var_ipamScope: "openid profile offline_access"
+      var_ipamGrantType: "client_credentials"
+      var_ipamOrganization: "DevPlat"
+      var_ipamApiVersion: "3.0"
 
-- name: Get Product App name from resourcegroupname
-  shell: >
-    echo $(az group show -n "{{ var_resourceGroupName }}" --query "tags.PRODUCT_APP" --output tsv) ;
-  register: var_productApp
+      ## Variables - Misc
+      var_buildingBlockVersion: "V1.7.1"
+      var_cwpLatestVersion: "1.8"
+      var_cwpUpdate: false
+      var_buildingBlockTemplate: "vm-windows"
+      var_resourceType: "Windows Virtual Machine"
+      var_dscConfigurationFile: "W2K16_MemberServer_v1_0.localhost"
+      var_availabilityZone: 0
+      
+      mandatory_parameters: ["{{ AZURE_RM_CLIENTID }}","{{ AZURE_RM_TENANTID }}","{{ var_location }}","{{ var_deploymentId }}","{{ var_owner }}","{{ var_chargeCode }}","{{ var_resourceGroupName }}", "{{ var_rolePurpose }}", "{{ var_productApp }}","{{ var_omsMyWorkSpaceId }}","{{ var_omsMyWorkspaceKey }}"]
+      mandatory_auth_parameters: ["{{ AZURE_RM_SECRET }}"]
 
-- name: Get keyvault name
-  shell: >
-    az resource list --resource-group "{{  var_resourceGroupName }}" --resource-type "Microsoft.KeyVault/vaults" --query "[].name" -o tsv
-  register: var_keyvaultName
+    tasks:
+    - name: Validations
+      block:
+        - name: Mandatory UnProtected Parameters
+          assert:
+            msg: "Mandatory parameter {{ item }} is not defined"
+            that:
+              - item is defined
+          with_items: "{{ mandatory_parameters }}"
 
-- name: Print oms Key
-  debug:
-    msg: "{{ var_omsKey }}"
+        - name: Mandatory Protected Parameters
+          assert:
+            msg: "Mandatory parameter {{ item }} is not defined"
+            that:
+              - item is defined
+          with_items: "{{ mandatory_auth_parameters }}"
+          no_log: true
 
-- name: Launch VM Building Block
-  uri:
-    url: "{{ towerAPI }}/job_templates/{{ templateNumber }}/launch/"
-    method: POST
-    return_content: yes
-    body: '{ "extra_vars" : "{ \"var_subnetName\": \"{{ var_subnetName }}\", \"var_vmName\": \"{{var_vmName}}\", \"var_domainJoin\": False, \"var_environment\": \"{{ var_environment}}\", \"var_resourceGroupName\": \"{{ var_resourceGroupName}}\", \"var_keyVaultName\": \"{{ var_keyvaultName.stdout }}\", \"var_location\": \"{{ var_location }}\", \"var_computerSize\": \"{{ var_computerSize }}\", \"var_owner\": \"{{ var_owner.stdout }}\", \"var_chargeCode\": \"{{ var_chargeCode.stdout }}\", \"var_deploymentId\": \"{{ var_deploymentId.stdout }}\", \"var_omsMyWorkSpaceId\": \"{{ var_omsMyWorkSpaceId }}\", \"var_omsMyWorkspaceKey\": \"{{ var_omsKey }}\", \"var_productApp\": \"{{var_productApp.stdout}}\" }"}'
-    body_format: json
-    status_code: 200, 201, 400
-    headers:
-      Authorization: "Bearer {{ tokenOutput.json.token }}"
-  register: var_apiOutput
+    - name: "Get date"
+      command: "date +%s"
+      register: TimeStamp
+
+    - name: AZ Login to Azure
+      shell: >
+           az login --service-principal
+           -u "{{ AZURE_RM_CLIENTID }}"
+           -p "{{ AZURE_RM_SECRET }}"
+           --tenant "{{ AZURE_RM_TENANTID }}" && az account set --subscription "{{ var_azure_rm_subid }}"
+      register: output
+      no_log: yes
+      ignore_errors: yes
+
+    - fail:
+        msg: "{{ output.stderr }}"
+      when: output is not success
+
+    - name: Grab tags
+      shell: az group show -g "{{ var_resourceGroupName }}" --query tags
+      register: rg_tags
+
+    - name: Block - Find Key Vault ( Dynamically )
+      block:
+        - name: Find Key Vault Name
+          shell: >
+            az keyvault list -g "{{ var_resourceGroupName }}" --query [0].name --output tsv
+          register: var_temp
+          when: var_keyVaultName is not defined
+
+        - name: Save Key Vault Name
+          set_fact:
+            var_keyVaultName: "{{ var_temp.stdout }}"
+          when: var_keyVaultName is not defined
+
+    - name: Block - Get Domain Info ( Dynamically )
+      block:
+        - name: Get Domain Name
+          shell: az group show -g "{{ var_resourceGroupName }}" --query tags.DOMAIN_NAME --output tsv
+          register: var_domainNameKV
+          when: var_domainName is not defined
+        
+        - name: Save Domain Name
+          set_fact: 
+            var_domainName: "{{ var_domainNameKV.stdout_lines[0] }}"
+          when: var_domainName is not defined
+
+        - name: Get Domain Admin Password
+          raw: Secret=$(az keyvault secret show --name domainAdminPassword --vault-name "{{ var_keyVaultName }}" --query value --output tsv); echo "$Secret"
+          register: var_temp
+          failed_when: "'Access denied' in var_temp.stderr"
+          when: var_domainAdminPassword is not defined
+          no_log: yes
+
+        - name: Save Domain Admin Password
+          set_fact:
+            var_domainAdminPassword: "{{ var_temp.stdout_lines[0] }}"
+          when: var_domainAdminPassword is not defined
+          no_log: yes
+      when: var_domainJoin == True    
+
+    - name: Prepare disk distribution 
+      set_fact:
+        var_dataDrives: "{{ (var_dataDrives | default([])) }} + [{{ item }}]"
+      with_items: "{{ var_dataDrivesList.split(',') }}"
+      when: "{{ var_dataDrivesList | length > 0 }}"
+
+    - name: Set CWP Version ( Dynamically )
+      set_fact:
+        var_cwpVersion: "{{ var_cwpLatestVersion }}"
+        var_cwpUpdate: true
+      when: var_cwpVersion is not defined
+
+    - name: Block - Create Local Admin Password ( Dynamically )
+      block:
+      - name: Create New Password
+        shell: >
+          echo $(</dev/urandom tr -dc 'A-Za-z0-9#()*+=>?~' | head -c 32 )
+        register: var_temp
+        when: var_localAdminPassword is not defined
+        no_log: yes
+
+      - name: Save New Password
+        set_fact:
+          var_localAdminPassword: "{{ var_temp.stdout }}"
+        when: var_localAdminPassword is not defined
+        no_log: yes
+
+    - name: Get VM Names
+      include_tasks: roles/meaningful_vm_role.yml
+      when: var_vmName is not defined
+
+    - name: "Deploy Windows Server IaaS - Save local admin user name on keyvault" 
+      azure_rm_deployment: 
+        client_id: "{{ AZURE_RM_CLIENTID }}"
+        secret: "{{ AZURE_RM_SECRET }}"
+        tenant: "{{ AZURE_RM_TENANTID }}"
+        subscription_id: "{{ var_azure_rm_subid }}"
+        deployment_name: "{{ var_vmName }}-LocalAdminUserNameOnKeyVault-{{ TimeStamp.stdout }}"
+        location: "{{ var_keyVaultLocation if var_keyVaultLocation is defined else var_location }}"
+        parameters: 
+          keyVaultname:
+            value: "{{ var_keyVaultName }}"
+          secretContentType: 
+            value: "text"
+          localUserNameSecretName:
+            value: "{{ var_vmName }}-LocalAdminUserName"
+          localUserNameSecretValue:
+            value: "{{ var_localAdminUser }}"
+          localUserPasswordSecretName: 
+            value: "{{ var_vmName }}-localAdminPassword"
+          localUserPasswordSecretValue:
+            value: "{{ var_localAdminPassword }}"
+        tags: "{{ (rg_tags.stdout if (rg_tags.stdout | length > 5) else default(omit)) }}"
+        resource_group_name: "{{ var_keyVaultResourceGroupName if var_keyVaultResourceGroupName is defined else var_resourceGroupName }}"
+        template_link: "{{ var_templateRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}/save_secret.json?{{ var_templateSasToken }}"
+
+    - name: Get Subnet information from IPAM
+      include_tasks: roles/ipam_get_subnet.yml
+
+    - name: Set DNS entries
+      set_fact:
+        var_dnsArray: "[ '{{ ipamResponse.json.primaryDC if var_subnetName is defined else ipamResponse.json[0].primaryDC }}' ]"
+      when: var_domainJoin == True
+
+    - name: "Deploy Windows Server IaaS - VM & DSC"
+      azure_rm_deployment: 
+        client_id: "{{ AZURE_RM_CLIENTID }}"
+        secret: "{{ AZURE_RM_SECRET }}"
+        tenant: "{{ AZURE_RM_TENANTID }}"
+        subscription_id: "{{ var_azure_rm_subid }}"
+        deployment_name: "{{ var_vmName }}-VM_DSC-{{ TimeStamp.stdout }}"
+        location: "{{ var_location }}"
+        parameters: 
+          computerName: 
+            value: "{{ var_vmName }}"
+          localAdminUser: 
+            value: "{{ var_localAdminUser }}"
+          localAdminPassword: 
+            value: "{{ var_localAdminPassword }}"
+          domainAdminUser: 
+            value: "{{ var_domainUser }}"
+          domainAdminPassword: 
+            value: "{{ var_domainAdminPassword if (var_domainJoin == True) else 'NULL' }}"
+          virtualNetworkResourceGroupName:
+            value: "{{ ipamResponse.json.vnet.resourceGroupName if var_subnetName is defined else ipamResponse.json[0].vnet.resourceGroupName }}"
+          virtualNetworkName:
+            value: "{{ ipamResponse.json.vnet.name if var_subnetName is defined else ipamResponse.json[0].vnet.name }}"
+          subnetName: 
+            value: "{{ ipamResponse.json.name if var_subnetName is defined else ipamResponse.json[0].name }}"
+          computerSize:
+            value: "{{ var_computerSize }}"
+          engagementId:
+            value: "{{ var_chargeCode }}"
+          owner:
+            value: "{{ var_owner }}"
+          deploymentId:
+            value: "{{ var_deploymentId }}"
+          rolePurpose:
+            value: "{{ var_rolePurpose }}"
+          buildingBlockNameTag:
+            value: "vm-windows-{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion}}"
+          environment:
+            value: "{{ var_environment }}"
+          productApp:
+            value: "{{ var_productApp }}"
+          artifactsUri:
+            value: "{{ var_templateRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}/"
+          artifactSasToken:
+            value: "{{ var_templateSasToken }}"
+          softwareUri:
+            value: "{{ var_softwareRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersion }}/"
+          softwareSasToken:
+            value: "?{{ var_softwareSasToken }}"
+          domainName: 
+            value: "{{ var_domainName if (var_domainJoin == True) else 'NULL' }}"
+          osDiskType: 
+            value: "{{ var_osDiskStorageType }}"
+          osDiskSize: 
+            value: "{{ var_osDiskSize }}"
+          dataDiskType: 
+            value: "{{ var_dataDiskStorageType }}"
+          dataDiskSizes: 
+            value: "{{ var_dataDrives }}"
+          DomainServerIP: 
+            value: "{{ var_dnsArray }}"
+          availabilityZone:
+            value: "{{ var_availabilityZone }}"
+          availabilitySetName:
+            value: "{{ var_availabilitySetName }}"
+          domainJoin:
+            value: "{{ var_domainJoin }}"
+          imageReferencePublisher:
+            value: "{{ var_imageReferencePublisher }}"
+          imageReferenceOffer:
+            value: "{{ var_imageReferenceOffer }}"
+          imageReferenceSku:
+            value: "{{ var_imageReferenceSku }}"
+          imageReferenceVersion:
+            value: "{{ var_imageReferenceVersion }}"
+        resource_group_name: "{{ var_resourceGroupName }}"
+        tags: "{{ (rg_tags.stdout if (rg_tags.stdout | length > 5) else default(omit)) }}"
+        template_link: "{{ var_templateRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}/azureDeploy.json?{{ var_templateSasToken }}"
+
+    - name: Restart the VM
+      shell: az vm restart -g "{{ var_resourceGroupName }}" -n "{{ var_vmName }}"
+
+    - name: Remove dsc extension
+      azure_rm_virtualmachine_extension:
+        client_id: "{{ AZURE_RM_CLIENTID }}"
+        secret: "{{ AZURE_RM_SECRET }}"
+        tenant: "{{ AZURE_RM_TENANTID }}"
+        subscription_id: "{{ var_azure_rm_subid }}"
+        name: "configureWindowsServer"
+        location: "{{ var_location }}"
+        resource_group: "{{ var_resourceGroupName }}"
+        virtual_machine_name: "{{ var_vmName }}"
+        state: absent
+
+    - name: "Deploy Windows Server IaaS - Default Extensions"
+      azure_rm_deployment: 
+        client_id: "{{ AZURE_RM_CLIENTID }}"
+        secret: "{{ AZURE_RM_SECRET }}"
+        tenant: "{{ AZURE_RM_TENANTID }}"
+        subscription_id: "{{ var_azure_rm_subid }}"
+        deployment_name: "{{ var_vmName }}-Default_Extensions-{{ TimeStamp.stdout }}"
+        location: "{{ var_location }}"
+        parameters: 
+          computerName: 
+            value: "{{ var_vmName }}"
+          oms_myWorkSpaceId:
+            value: "{{ var_omsMyWorkSpaceId }}"
+          oms_myWorkspaceKey:
+            value: "{{ var_omsMyWorkspaceKey }}"
+          artifactsUri:
+            value: "{{ var_templateRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}/"
+          artifactSasToken:
+            value: "{{ var_templateSasToken }}"
+          dscAutomationUri:
+            value: "{{ var_dscAutomationUri }}"
+          dscAutomationKey:
+            value: "{{ var_dscAutomationKey }}"
+          dscConfigurationFile:
+            value: "{{ var_dscConfigurationFile }}"
+          buildingBlockVersion:
+            value: "{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}"
+        resource_group_name: "{{ var_resourceGroupName }}"
+        tags: "{{ (rg_tags.stdout if (rg_tags.stdout | length > 5) else default(omit)) }}"
+        template_link: "{{ var_templateRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}/install_default_extensions.json?{{ var_templateSasToken }}"
+
+    - name: Restart the VM
+      shell: az vm restart -g "{{ var_resourceGroupName }}" -n "{{ var_vmName }}"
+
+    - name: Remove custom script extension
+      azure_rm_virtualmachine_extension:
+        client_id: "{{ AZURE_RM_CLIENTID }}"
+        secret: "{{ AZURE_RM_SECRET }}"
+        tenant: "{{ AZURE_RM_TENANTID }}"
+        subscription_id: "{{ var_azure_rm_subid }}"
+        name: "ConfigureLCMforAAPull"
+        location: "{{ var_location }}"
+        resource_group: "{{ var_resourceGroupName }}"
+        virtual_machine_name: "{{ var_vmName }}"
+        state: absent
+
+    - name: "Deploy Windows Server IaaS - CWP Extension"
+      azure_rm_deployment: 
+        client_id: "{{ AZURE_RM_CLIENTID }}"
+        secret: "{{ AZURE_RM_SECRET }}"
+        tenant: "{{ AZURE_RM_TENANTID }}"
+        subscription_id: "{{ var_azure_rm_subid }}"
+        deployment_name: "{{ var_vmName }}-CWP_Extension-{{ TimeStamp.stdout }}"
+        location: "{{ var_location }}"
+        parameters: 
+          computerName: 
+            value: "{{ var_vmName }}"
+          cwp_version: 
+            value: "{{ var_cwpVersion }}"
+          cwp_update:
+            value: "{{ var_cwpUpdate }}"
+          cwp_customerId: 
+            value: "{{ var_cwpCustomerId }}"
+          cwp_domainId:
+            value: "{{ var_cwpDomainId }}"
+          cwp_forceReboot:
+            value: "{{ var_cwpForceReboot }}"
+          cwp_clientId:
+            value: "{{ var_cwpClientId }}"
+          cwp_customerSecretKey:
+            value: "{{ var_cwpCustomerSecretKey }}"
+          cwp_clientSecretKey: 
+            value: "{{ var_cwpClientSecretKey }}"
+        resource_group_name: "{{ var_resourceGroupName }}"
+        tags: "{{ (rg_tags.stdout if (rg_tags.stdout | length > 5) else default(omit)) }}"
+        template_link: "{{ var_templateRepoUrl }}/{{ var_buildingBlockTemplate }}/{{ var_buildingBlockVersionVmWindows if var_buildingBlockVersionVmWindows is defined else var_buildingBlockVersion }}/install_cwp_extensions.json?{{ var_templateSasToken }}"
+      ignore_errors: yes
+
+    - name: Restart the VM
+      shell: az vm restart -g "{{ var_resourceGroupName }}" -n "{{ var_vmName }}"
+
+    - name: Create parameter for Backup Policy Name
+      set_fact:
+        var_recoveryServicesVaultPolicyName: "{{ var_recoveryServicesVaultPolicyName }}"
+
+    - name: Get Resource ID
+      shell: az resource list -g {{ var_resourceGroupName }} --name {{ var_vmName }} --query [0].id
+      register: resourceId
+
+    - name: Get Primary Private IP address
+      shell: az vm list-ip-addresses -g {{ var_resourceGroupName }} --name {{ var_vmName }} --query [0].virtualMachine.network.privateIpAddresses[0] -o tsv
+      register: privateIpAddress
+
+    - name: Print Resource ID
+      debug:
+        msg: "resource_id:vm-windows:{{ resourceId.stdout }}"
+
+    - name: Print Private IP address
+      debug:
+        msg: "private_ip:{{ var_vmName }}:{{ privateIpAddress.stdout }}"
+
+  - name: Add VM To Backup Tower
+    import_playbook: ../../recovery-vault-backup-vm/V1.0.0/Create_recovery-vault-backup-vm.yml
+    vars:
+      var_buildingBlockVersionFromCall: "V1.0.0"
+      var_recoveryServicesVaultPolicyName: "{{ var_recoveryServicesVaultPolicyName }}"
+      var_protectedVmsResourceGroupName: "{{ var_resourceGroupName }}"
+      var_protectedVmsNames: "{{ var_vmName }}"
+    when: var_recoveryServicesVaultName is defined and var_recoveryServicesVaultResourceGroupName is defined

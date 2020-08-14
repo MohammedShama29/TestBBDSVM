@@ -1,0 +1,41 @@
+- name: Get Token
+  uri:
+    url: "{{ var_mnfTokenUri }}"
+    method: POST
+    body_format:  raw
+    body: client_id={{ var_mnfClientId }}&client_secret={{ var_mnfClientSecret }}&scope={{ var_mnfScope }}&grant_type={{ var_mnfGrantType }}&resource={{ var_mnfClientIdResource }}    
+    return_content: yes
+    status_code: 200
+    timeout: 60
+    headers:
+      Content-Type: "application/x-www-form-urlencoded"
+  register: var_mnfTokenResponse
+  no_log: true
+
+- name: Get VM Names
+  uri:
+    url: "{{ var_mnfUri }}"
+    method: POST
+    body_format: json
+    headers:
+      Authorization: "Bearer {{ var_mnfTokenResponse.json.access_token }}"
+      Content-Type: "application/json"
+    body:
+      productName: "{{ var_deploymentId[0:3] }}"
+      resourceTypeName: "{{ var_resourceType }}"
+      projectName: "{{ var_deploymentId[3:6] }}"
+      regionName: "{{ var_location }}"
+      environmentName: "{{ var_environment }}"
+    return_content: yes
+    status_code: 200
+    timeout: 60
+  register: var_mnfResponse
+  ignore_errors: true
+
+- fail:
+    msg: "MEANINGFULL Error - Error code: {{ var_mnfResponse.status }} - {{ var_mnfResponse.json }} "
+  when: var_mnfResponse is not success
+
+- name: Name to array
+  set_fact:
+    var_vmName: "{{ var_mnfResponse.json[0].name }}"
