@@ -1,0 +1,20 @@
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: CTP - Building Blocks/pipeline-templates
+      ref: refs/heads/version/V1.0.2
+
+trigger: none
+
+pool:
+  name: building-blocks-docker-agents
+  workspace:
+    clean: all
+
+stages:
+  - template: build.yml@templates
+  - template: dev.yml@templates
+  - template: qa.yml@templates
+  - template: staging.yml@templates
+  - template: prod.yml@templates

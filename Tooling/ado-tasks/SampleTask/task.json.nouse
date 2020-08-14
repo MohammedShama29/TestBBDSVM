@@ -1,0 +1,124 @@
+{
+  "id": "a78d1154-2d11-4cc9-8bac-98ae0a259501",
+  "name": "BBCreateresourcegroup",
+  "friendlyName": "BB-Create_resource-group",
+  "description": "BB-Testing-Task",
+  "author": "Pablo Loiacono & Alejandro Illaragorri",
+  "helpMarkDown": "This is the vNextBB",
+  "category": "Deploy",
+  "visibility": [
+    "Build",
+    "Release"
+  ],
+  "demands": [],
+  "version": {
+    "Major": "1",
+    "Minor": "15",
+    "Patch": "1915002184"
+  },
+  "minimumAgentVersion": "1.95.0",
+  "instanceNameFormat": "Deploy BB",
+  "inputs": [
+    {
+        "name":  "TowerUser",
+        "type":  "string",
+        "label":  "TowerUser",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "TowerPassword",
+        "type":  "string",
+        "label":  "TowerPassword",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_location",
+        "type":  "string",
+        "label":  "var_location",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_productApp",
+        "type":  "string",
+        "label":  "var_productApp",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_environment",
+        "type":  "string",
+        "label":  "var_environment",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_ctpService",
+        "type":  "string",
+        "label":  "var_ctpService",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_chargeCode",
+        "type":  "string",
+        "label":  "var_chargeCode",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_owner",
+        "type":  "string",
+        "label":  "var_owner",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_deploymentId",
+        "type":  "string",
+        "label":  "var_deploymentId",
+        "defaultValue":  "",
+        "required":  true,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_azure_rm_subid",
+        "type":  "string",
+        "label":  "var_azure_rm_subid",
+        "defaultValue":  "",
+        "required":  false,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_resourceType",
+        "type":  "string",
+        "label":  "var_resourceType",
+        "defaultValue":  "",
+        "required":  false,
+        "helpMarkDown":  "Help Message Here"
+    },
+    {
+        "name":  "var_resourceGroupName",
+        "type":  "string",
+        "label":  "var_resourceGroupName",
+        "defaultValue":  "",
+        "required":  false,
+        "helpMarkDown":  "Help Message Here"
+    }
+],
+  "execution": {
+    "PowerShell3": {
+      "target":  "sample.ps1"
+    }
+  }
+}
